@@ -1,0 +1,382 @@
+# version: '3'
+
+# services:
+#   namenode:
+#     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+#     container_name: namenode
+#     restart: always
+#     ports:
+#       - 9870:9870
+#       - 9000:9000
+#     volumes:
+#       - hadoop_namenode:/hadoop/dfs/name
+#     environment:
+#       - CLUSTER_NAME=test
+#     env_file:
+#       - ./hadoop.env
+
+#   datanode:
+#     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+#     container_name: datanode
+#     restart: always
+#     volumes:
+#       - hadoop_datanode:/hadoop/dfs/data
+#     environment:
+#       SERVICE_PRECONDITION: "namenode:9870"
+#     env_file:
+#       - ./hadoop.env
+
+#   resourcemanager:
+#     image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+#     container_name: resourcemanager
+#     restart: always
+#     environment:
+#       SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+#     env_file:
+#       - ./hadoop.env
+
+#   nodemanager:
+#     image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+#     container_name: nodemanager
+#     restart: always
+#     environment:
+#       SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+#     env_file:
+#       - ./hadoop.env
+
+#   historyserver:
+#     image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+#     container_name: historyserver
+#     restart: always
+#     environment:
+#       SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+#     volumes:
+#       - hadoop_historyserver:/hadoop/yarn/timeline
+#     env_file:
+#       - ./hadoop.env
+
+#   spark-master:
+#     image: bde2020/spark-master:3.1.1-hadoop3.2
+#     container_name: spark-master
+#     ports:
+#       - "8080:8080"
+#       - "7077:7077"
+#     volumes:
+#       - ./src:/opt/workspace/src
+#     environment:
+#       - INIT_DAEMON_STEP=setup_spark
+
+#   spark-worker-1:
+#     image: bde2020/spark-worker:3.1.1-hadoop3.2
+#     container_name: spark-worker-1
+#     depends_on:
+#       - spark-master
+#     ports:
+#       - "8081:8081"
+#     environment:
+#       - "SPARK_MASTER=spark://spark-master:7077"
+
+#   zookeeper:
+#     image: wurstmeister/zookeeper
+#     container_name: zookeeper
+#     ports:
+#       - "2181:2181"
+
+#   kafka:
+#     image: wurstmeister/kafka
+#     container_name: kafka
+#     ports:
+#       - "9092:9092"
+#     environment:
+#       KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+#       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+#       KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+#       KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+#       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+#       KAFKA_CREATE_TOPICS: "real-estate:1:1"
+#     volumes:
+#       - /var/run/docker.sock:/var/run/docker.sock
+
+# volumes:
+#   hadoop_namenode:
+#   hadoop_datanode:
+#   hadoop_historyserver:
+# version: '3'
+
+# x-airflow-common: &airflow-common
+#   image: apache/airflow:2.7.1
+#   environment: &airflow-common-env
+#     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+#     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+#     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+#     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+#     AIRFLOW__CORE__FERNET_KEY: ''
+#     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+#     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+#     AIRFLOW__WEBSERVER__SECRET_KEY: 'test123'
+#     AIRFLOW__WEBSERVER__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
+#     AIRFLOW_HOME: "/opt/airflow"
+#     AIRFLOW__WEBSERVER__BASE_URL: 'http://localhost:8092'
+#   volumes:
+#     - ./dags:/opt/airflow/dags
+#     - ./logs:/opt/airflow/logs
+#     - ./plugins:/opt/airflow/plugins
+#   depends_on: &airflow-common-depends-on
+#     redis:
+#       condition: service_healthy
+#     postgres:
+#       condition: service_healthy
+
+# version: '3'
+# Postegré qui marche
+# services:
+#   postgres:
+#     image: postgres:13
+#     container_name: airflow-postgres
+#     environment:
+#       POSTGRES_USER: airflow
+#       POSTGRES_PASSWORD: airflow
+#       POSTGRES_DB: airflow
+#     volumes:
+#       - postgres-db-volume:/var/lib/postgresql/data
+#     healthcheck:
+#       test: [ "CMD", "pg_isready", "-U", "airflow" ]
+#       interval: 5s
+#       retries: 5
+#     restart: always
+services:
+  postgres:
+    image: postgres:13
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+      - ./jdbc-drivers:/jdbc-drivers # Nouveau volume pour le driver
+      - jdbc-drivers:/jdbc-drivers
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      interval: 5s
+      retries: 5
+    networks:
+      - spark_network
+    restart: always
+
+  nifi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nifi
+    ports:
+      - "8282:8080"
+    environment:
+      - SINGLE_USER_CREDENTIALS_USERNAME=admin
+      - SINGLE_USER_CREDENTIALS_PASSWORD=admin12345678
+      - NIFI_WEB_HTTP_PORT=8080
+      - NIFI_WEB_HTTPS_PORT=
+      - NIFI_WEB_HTTP_HOST=0.0.0.0
+      - NIFI_WEB_PROXY_HOST=
+      - NIFI_SECURITY_USER_AUTHORIZER=single-user-authorizer
+      - NIFI_SECURITY_ALLOW_ANONYMOUS_AUTHENTICATION=true
+      - NIFI_SENSITIVE_PROPS_KEY=nifi-key-123456
+    volumes:
+      - nifi_data:/opt/nifi/nifi-current/data
+      - nifi_conf:/opt/nifi/nifi-current/conf
+      - nifi_state:/opt/nifi/nifi-current/state
+      - nifi_content:/opt/nifi/nifi-current/content_repository
+      - nifi_database:/opt/nifi/nifi-current/database_repository
+      - nifi_flowfile:/opt/nifi/nifi-current/flowfile_repository
+      - nifi_provenance:/opt/nifi/nifi-current/provenance_repository
+      - ./nifi/scripts:/opt/nifi/nifi-current/scripts
+      - C:/Users/Imam Said/Downloads/Projet_final_master_2/docker:/opt/nifi/nifi-current/local_scripts
+    networks:
+      - spark_network
+    restart: always
+  # *******************************************************
+  jupyter-spark:
+    image: custom-pyspark-notebook
+    container_name: jupyter-spark
+    user: root
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      GRANT_SUDO: "yes"
+      NB_USER: "jovyan"
+      NB_UID: "1000"
+      NB_GID: "100"
+      CHOWN_HOME: "yes"
+      CHOWN_EXTRA: "/home/jovyan/.local/share/jupyter"
+      CHOWN_EXTRA_OPTS: "-R"
+      SPARK_HOME: "/usr/local/spark"
+      PYSPARK_PYTHON: "/opt/conda/bin/python3"
+      PYSPARK_DRIVER_PYTHON: "/opt/conda/bin/python3"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./src:/opt/workspace/src
+      - jupyter_runtime:/home/jovyan/.local/share/jupyter/runtime
+    networks:
+      - spark_network
+    depends_on:
+      - spark-master
+
+  # Spark qui marche super bien
+  # jupyter-spark:
+  #   image: jupyter/pyspark-notebook:spark-3.1.1
+  #   container_name: jupyter-spark
+  #   user: root # Important : démarrer en tant que root
+  #   ports:
+  #     - "8888:8888"
+  #   environment:
+  #     JUPYTER_ENABLE_LAB: "yes"
+  #     GRANT_SUDO: "yes"
+  #     NB_USER: "jovyan"
+  #     NB_UID: "1000"
+  #     NB_GID: "100"
+  #     CHOWN_HOME: "yes"
+  #     CHOWN_EXTRA: "/home/jovyan/.local/share/jupyter"
+  #     CHOWN_EXTRA_OPTS: "-R"
+  #     SPARK_HOME: "/usr/local/spark"
+  #     PYSPARK_PYTHON: "/opt/conda/bin/python3"
+  #     PYSPARK_DRIVER_PYTHON: "/opt/conda/bin/python3"
+  #   volumes:
+  #     - ./notebooks:/home/jovyan/work
+  #     - ./src:/opt/workspace/src
+  #     - jupyter_runtime:/home/jovyan/.local/share/jupyter/runtime
+  #   networks:
+  #     - spark_network
+  #   depends_on:
+  #     - spark-master
+  # namenode:
+  #   image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+  #   container_name: namenode
+  #   restart: always
+  #   ports:
+  #     - 9870:9870
+  #     - 9000:9000
+  #   volumes:
+  #     - hadoop_namenode:/hadoop/dfs/name
+  #   environment:
+  #     - CLUSTER_NAME=test
+  #   env_file:
+  #     - ./hadoop.env
+  #   networks:
+  #     - spark_network
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - spark_network
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+    env_file:
+      - ./hadoop.env
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    env_file:
+      - ./hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.1.1-hadoop3.2
+    container_name: spark-master
+    ports:
+      - "8091:8080"
+      - "7077:7077"
+    volumes:
+      - ./src:/opt/workspace/src
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+    networks:
+      - spark_network
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.1.1-hadoop3.2
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+    networks:
+      - spark_network
+
+  # zookeeper:
+  #   image: wurstmeister/zookeeper
+  #   container_name: zookeeper
+  #   ports:
+  #     - "2181:2181"
+  zookeeper:
+    image: wurstmeister/zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    networks:
+      - spark_network # Ajoutez cette ligne
+  # kafka:
+  #   image: wurstmeister/kafka
+  #   container_name: kafka
+  #   ports:
+  #     - "9092:9092"
+  #   environment:
+  #     KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+  #     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+  #     KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+  #     KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+  #     KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  #     KAFKA_CREATE_TOPICS: "real-estate:1:1"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   networks:
+  #     - spark_network
+
+volumes:
+  postgres-db-volume:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+  nifi_data:
+  nifi_conf:
+  nifi_state:
+  nifi_content:
+  nifi_database:
+  nifi_flowfile:
+  nifi_provenance:
+  jdbc-drivers:
+  jupyter_data:
+  jupyter_runtime:
+
+
+networks:
+  spark_network:
